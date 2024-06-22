@@ -50,8 +50,9 @@ fn server(receiver: Receiver<Messages>, mut users: HashMap<String, TcpStream>) {
                     if *address == user {
                         continue;
                     }
-
-                    stream.write(&values).unwrap();
+                    let user_intro = format!("{}: ", user).as_bytes().to_vec(); 
+                    let val = [user_intro, values.clone()].concat();
+                    stream.write(&val).unwrap();
                 }
             }
             Messages::Disconnect(address) => {
