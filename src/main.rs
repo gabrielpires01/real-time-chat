@@ -7,7 +7,7 @@ use std::collections::HashMap;
 enum Messages {
     New(Vec<u8>, String),
     Disconnect(String),
-    Connect(String, TcpStream),
+    Connect(TcpStream, String),
 }
 
 fn main() {
@@ -28,18 +28,14 @@ fn main() {
         match stream {
             Ok(stream) => {
                 let sender = sender.clone();
-                let author_address = stream.peer_addr().unwrap();
-                let user = author_address.to_string();
-                sender.send(Messages::Connect(user, stream.try_clone().unwrap())).unwrap();
                 thread::spawn(|| client(sender, stream));
             }
             Err(_e) => {
-                panic!("Could not read stream")
+                println!("Could not read stream")
             }
         };
     };
 }
-
 
 fn server(receiver: Receiver<Messages>, mut users: HashMap<String, TcpStream>) {
     loop {
@@ -50,7 +46,8 @@ fn server(receiver: Receiver<Messages>, mut users: HashMap<String, TcpStream>) {
                     if *address == user {
                         continue;
                     }
-                    let user_intro = format!("{}: ", user).as_bytes().to_vec(); 
+                    
+                    let user_intro = format!("{}: ", user.trim()).as_bytes().to_vec(); 
                     let val = [user_intro, values.clone()].concat();
                     stream.write(&val).unwrap();
                 }
@@ -59,9 +56,9 @@ fn server(receiver: Receiver<Messages>, mut users: HashMap<String, TcpStream>) {
                 println!("Disconnected");
                 users.remove(&address); 
             }
-            Messages::Connect(address, stream) => {
-                println!("Connection established with {}", address);
-                users.insert(address, stream);
+            Messages::Connect(stream, user) => {
+                println!("Connection established with {}", user);
+                users.insert(user, stream);
             }
         }
     }
@@ -70,18 +67,43 @@ fn server(receiver: Receiver<Messages>, mut users: HashMap<String, TcpStream>) {
 fn client(sender: Sender<Messages>, mut stream: TcpStream)  {
     let mut buffer = Vec::new();
     buffer.resize(64, 0);
+
+    stream.write(b"Seu nome: ").unwrap();
+
+    let read_from_stream = stream.read(&mut buffer);
+    let mut user = "".to_string();
+    match read_from_stream {
+        Ok(n) => {
+            let buffer_slice = &buffer[0..n];
+            let user_intro = b"Changing username to ".to_vec(); 
+            let val = [user_intro, buffer_slice.to_vec().clone()].concat();
+            stream.write(&val).unwrap();
+            match String::from_utf8(buffer_slice.to_vec()) {
+                Ok(username) => {
+                    user = username
+                }
+                Err(_e) => {
+                    todo!()
+                }
+            }
+        }
+        Err(..) => {
+            println!("No name inputed");
+            stream.shutdown(Shutdown::Both).expect("shutdown connection");
+        }
+    }
+    sender.send(Messages::Connect(stream.try_clone().unwrap(), user.clone())).unwrap();
     loop {
+        let cloned_user = user.clone();
         let read_from_stream = stream.read(&mut buffer);
         match read_from_stream {
             Ok(n) => {
-                let author_address = stream.peer_addr().unwrap();
-                let user = author_address.to_string();
                 if n == 0 {
-                    sender.send(Messages::Disconnect(user)).unwrap();
+                    sender.send(Messages::Disconnect(cloned_user)).unwrap();
                     break
                 };
                 let buffer_slice = &buffer[0..n];
-                sender.send(Messages::New(buffer_slice.to_vec(), user)).unwrap();
+                sender.send(Messages::New(buffer_slice.to_vec(), cloned_user)).unwrap();
             }
             Err(..) => {
                 println!("Disconnected");
